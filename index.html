@@ -254,23 +254,22 @@
 
 <script>
   // ── Configuration ──────────────────────────────────────────────────────────
-  const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbxdGQp3Jq5Q-xy4hcuMJuA2q_aeDGhAG1_Ick9y7dbtz-NEl93ZmkDJ57113CCWfoiG/exec';
+  // Google Form endpoint — accepts submissions from any device, no CORS issues
+  const FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSc-LgbRwdJDWWDWGnYHMAJBO3J8xwmvhHczftZ3frTwog8oFw/formResponse';
+  const ENTRIES  = {
+    person_name   : 'entry.948393677',
+    business_name : 'entry.1713015530',
+    job_title     : 'entry.2124286416',
+    email         : 'entry.1601654182',
+    phone         : 'entry.916624518',
+    id            : 'entry.9691119',
+    note          : 'entry.1994934280'
+  };
 
   let videoStream  = null;
   let scanInterval = null;
   let current      = null;
   let lastScanData = null;
-
-  // ── Check if we just returned from a successful save ──────────────────────
-  (function checkSaved() {
-    const sp = new URLSearchParams(window.location.search);
-    const savedName = sp.get('saved');
-    if (savedName) {
-      // Clean the URL so refreshing doesn't re-show the toast
-      history.replaceState({}, '', window.location.pathname);
-      setTimeout(() => showToast('✅ ' + decodeURIComponent(savedName) + ' sauvegardé!', false), 200);
-    }
-  })();
 
   // ── Start camera ──────────────────────────────────────────────────────────
   function startScanner() {
@@ -346,28 +345,27 @@
     btn.textContent = '✅  Sauvegarder dans la feuille';
   }
 
-  // ── Save via full-page navigation ────────────────────────────────────────
-  // Navigate the whole page to Apps Script — it saves the data then redirects
-  // back here with ?saved=Name. Works reliably on all devices (desktop + mobile).
+  // ── Save via Google Forms fetch ───────────────────────────────────────────
+  // fetch() to docs.google.com bypasses Android's script.google.com interception.
+  // Fire-and-forget (no-cors) — Google Forms is reliable, show toast immediately.
   function saveContact() {
-    const params = new URLSearchParams({
-      action        : 'save',
-      person_name   : current.person_name   || '',
-      business_name : current.business_name || '',
-      job_title     : current.job_title     || '',
-      email         : current.email         || '',
-      phone         : current.phone         || '',
-      id            : current.id            || '',
-      note          : document.getElementById('note-field').value.trim()
+    const name = current.person_name || 'Contact';
+    const note = document.getElementById('note-field').value.trim();
+
+    const body = new URLSearchParams({
+      [ENTRIES.person_name]   : current.person_name   || '',
+      [ENTRIES.business_name] : current.business_name || '',
+      [ENTRIES.job_title]     : current.job_title     || '',
+      [ENTRIES.email]         : current.email         || '',
+      [ENTRIES.phone]         : current.phone         || '',
+      [ENTRIES.id]            : current.id            || '',
+      [ENTRIES.note]          : note
     });
 
-    // Stop camera stream before navigating away
-    if (videoStream) {
-      videoStream.getTracks().forEach(t => t.stop());
-      videoStream = null;
-    }
+    fetch(FORM_URL, { method: 'POST', mode: 'no-cors', body });
 
-    window.location.href = BACKEND_URL + '?' + params.toString();
+    showToast('✅ ' + name + ' sauvegardé!', false);
+    resetScanner();
   }
 
   function cancelSave() {
