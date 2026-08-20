@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>SIQ Badge Scanner</title>
+  <!--
+    ── Velox Power Systems / SIQ Badge Scanner — version mobile autonome ──────
+    Ce fichier n'utilise PAS google.script.run.
+    Il appelle l'Apps Script via fetch() (Content-Type: text/plain, pas de preflight CORS).
+    Héberger sur Netlify Drop ou tout hébergeur non-Google pour contourner
+    l'interception de script.google.com par Google Drive sur Android.
+
+    Si vous redéployez l'Apps Script et obtenez une nouvelle URL, mettez à jour
+    la constante BACKEND_URL ci-dessous, puis re-uploadez ce fichier.
+  -->
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #0f1621;
+      color: #fff;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      background: #3d4859;
+      padding: 14px 20px;
+      text-align: center;
+      border-bottom: 2px solid #66bfd4;
+    }
+    header h1 { font-size: 17px; color: #66bfd4; letter-spacing: 1px; }
+    header p  { font-size: 11px; color: #9aacbc; margin-top: 2px; }
+
+    /* ── Scanner section ── */
+    #scanner-section { padding: 16px; }
+
+    #video-wrap {
+      position: relative;
+      width: 100%;
+      max-width: 420px;
+      margin: 0 auto;
+      border-radius: 14px;
+      overflow: hidden;
+      background: #000;
+      aspect-ratio: 4/3;
+    }
+
+    #video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: none;
+    }
+
+    canvas { display: none; }
+
+    /* Corner-bracket viewfinder */
+    #viewfinder {
+      display: none;
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 200px; height: 200px;
+    }
+    #viewfinder::before, #viewfinder::after,
+    #viewfinder span::before, #viewfinder span::after {
+      content: '';
+      position: absolute;
+      width: 28px; height: 28px;
+      border-color: #66bfd4;
+      border-style: solid;
+    }
+    #viewfinder::before        { top: 0;    left: 0;    border-width: 3px 0 0 3px; border-radius: 4px 0 0 0; }
+    #viewfinder::after         { top: 0;    right: 0;   border-width: 3px 3px 0 0; border-radius: 0 4px 0 0; }
+    #viewfinder span::before   { bottom: 0; left: 0;    border-width: 0 0 3px 3px; border-radius: 0 0 0 4px; }
+    #viewfinder span::after    { bottom: 0; right: 0;   border-width: 0 3px 3px 0; border-radius: 0 0 4px 0; }
+
+    /* Animated scan line */
+    #scan-line {
+      display: none;
+      position: absolute;
+      left: 10%; width: 80%;
+      height: 2px;
+      background: linear-gradient(to right, transparent, #66bfd4, transparent);
+      animation: scanMove 2s linear infinite;
+      top: 15%;
+    }
+    @keyframes scanMove {
+      0%   { top: 15%; }
+      50%  { top: 80%; }
+      100% { top: 15%; }
+    }
+
+    #status {
+      text-align: center;
+      padding: 12px 8px 4px;
+      font-size: 14px;
+      color: #66bfd4;
+      min-height: 44px;
+    }
+
+    #start-btn {
+      display: block;
+      margin: 12px auto 0;
+      padding: 15px 32px;
+      background: #66bfd4;
+      color: #0f1621;
+      border: none;
+      border-radius: 10px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      width: 90%;
+      max-width: 320px;
+    }
+
+    /* ── Contact card ── */
+    #contact-card {
+      display: none;
+      margin: 16px;
+      background: #1a2535;
+      border-radius: 14px;
+      overflow: hidden;
+    }
+
+    .card-header {
+      background: #3d4859;
+      padding: 16px 18px 12px;
+      border-bottom: 2px solid #66bfd4;
+    }
+    .card-header h2 { font-size: 21px; font-weight: 700; }
+    .card-header .company { font-size: 13px; color: #66bfd4; margin-top: 3px; }
+
+    .card-body { padding: 14px 18px; }
+
+    .info-row {
+      display: flex;
+      gap: 8px;
+      font-size: 13px;
+      padding: 5px 0;
+      border-bottom: 1px solid #2a3a50;
+    }
+    .info-row:last-of-type { border-bottom: none; }
+    .info-label { color: #7a94aa; min-width: 56px; }
+    .info-value { color: #e8f0f6; }
+
+    #note-field {
+      width: 100%;
+      background: #0f1621;
+      border: 1px solid #3d4859;
+      border-radius: 8px;
+      color: #e8f0f6;
+      padding: 10px 12px;
+      font-size: 14px;
+      margin-top: 14px;
+      resize: none;
+      height: 72px;
+      font-family: inherit;
+    }
+    #note-field:focus { outline: none; border-color: #66bfd4; }
+    #note-field::placeholder { color: #5a7a8a; }
+
+    .card-actions { padding: 0 18px 18px; }
+
+    #save-btn {
+      display: block;
+      width: 100%;
+      padding: 14px;
+      background: #66bfd4;
+      color: #0f1621;
+      border: none;
+      border-radius: 10px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 4px;
+    }
+    #save-btn:disabled { background: #3a4a5a; color: #6a8a9a; cursor: default; }
+
+    #cancel-btn {
+      display: block;
+      width: 100%;
+      padding: 11px;
+      background: transparent;
+      color: #7a94aa;
+      border: 1px solid #3d4859;
+      border-radius: 10px;
+      font-size: 14px;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+
+    /* ── Toast ── */
+    #toast {
+      display: none;
+      position: fixed;
+      bottom: 28px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #1D8A5F;
+      color: #fff;
+      padding: 12px 22px;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 600;
+      z-index: 999;
+      white-space: nowrap;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    }
+    #toast.error { background: #B4453F; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🏭 SIQ BADGE SCANNER</h1>
+  <p>Velox Power Systems — Salon Industriel de Québec</p>
+</header>
+
+<!-- Scanner view -->
+<div id="scanner-section">
+  <div id="video-wrap">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+    <div id="viewfinder"><span></span></div>
+    <div id="scan-line"></div>
+  </div>
+  <div id="status">Appuyez pour démarrer le scanner</div>
+  <button id="start-btn" onclick="startScanner()">📷 &nbsp;Démarrer le scanner</button>
+</div>
+
+<!-- Contact card (shown after scan) -->
+<div id="contact-card">
+  <div class="card-header">
+    <h2 id="c-name"></h2>
+    <div class="company" id="c-company"></div>
+  </div>
+  <div class="card-body">
+    <div class="info-row"><span class="info-label">Titre</span><span class="info-value" id="c-title"></span></div>
+    <div class="info-row"><span class="info-label">Email</span><span class="info-value" id="c-email"></span></div>
+    <div class="info-row"><span class="info-label">Tél.</span><span class="info-value" id="c-phone"></span></div>
+    <textarea id="note-field" placeholder="Note (optionnelle) — ex: intéressé par la gamme 36V, relancer en octobre..."></textarea>
+  </div>
+  <div class="card-actions">
+    <button id="save-btn" onclick="saveContact()">✅ &nbsp;Sauvegarder dans la feuille</button>
+    <button id="cancel-btn" onclick="cancelSave()">Annuler — Scanner un autre badge</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+  // ── Configuration ──────────────────────────────────────────────────────────
+  // If you ever create a NEW Apps Script deployment, update this URL.
+  // To update: just change the string and re-upload this file to Netlify.
+  const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbxvKwj3GSF_PjNj498zRLQrzBsiKc6yqQPCVuBhZ9REUOjIRuHt4LCSTBp9ZWirNFqx/exec';
+
+  let videoStream  = null;
+  let scanInterval = null;
+  let current      = null;
+  let lastScanData = null;   // debounce: ignore repeated reads of same code
+
+  // ── Start camera ──────────────────────────────────────────────────────────
+  function startScanner() {
+    setStatus('Démarrage de la caméra…');
+    document.getElementById('start-btn').style.display = 'none';
+
+    navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } }
+    })
+    .then(stream => {
+      videoStream = stream;
+      const vid = document.getElementById('video');
+      vid.srcObject = stream;
+      vid.style.display = 'block';
+      document.getElementById('viewfinder').style.display = 'block';
+      document.getElementById('scan-line').style.display  = 'block';
+
+      vid.addEventListener('loadedmetadata', () => {
+        vid.play();
+        setStatus('📷 Pointez vers un badge QR');
+        scanInterval = setInterval(scanFrame, 250);
+      });
+    })
+    .catch(err => {
+      setStatus('Erreur caméra: ' + err.message);
+      document.getElementById('start-btn').style.display = 'block';
+    });
+  }
+
+  // ── Scan a single video frame ─────────────────────────────────────────────
+  function scanFrame() {
+    const vid    = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    if (vid.readyState < vid.HAVE_ENOUGH_DATA) return;
+
+    canvas.width  = vid.videoWidth;
+    canvas.height = vid.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
+
+    const img  = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
+
+    if (!code || code.data === lastScanData) return;
+
+    try {
+      const data = JSON.parse(code.data);
+      if (data.person_name) {
+        lastScanData = code.data;   // debounce
+        clearInterval(scanInterval);
+        showContact(data);
+      }
+    } catch (_) {
+      // Not a valid badge QR — keep scanning silently
+    }
+  }
+
+  // ── Show parsed contact card ───────────────────────────────────────────────
+  function showContact(data) {
+    current = data;
+    document.getElementById('scanner-section').style.display = 'none';
+    document.getElementById('contact-card').style.display    = 'block';
+
+    document.getElementById('c-name').textContent    = data.person_name    || '—';
+    document.getElementById('c-company').textContent = data.business_name  || '';
+    document.getElementById('c-title').textContent   = data.job_title      || '—';
+    document.getElementById('c-email').textContent   = data.email          || '—';
+    document.getElementById('c-phone').textContent   = data.phone          || '—';
+    document.getElementById('note-field').value      = '';
+
+    const btn = document.getElementById('save-btn');
+    btn.disabled    = false;
+    btn.textContent = '✅  Sauvegarder dans la feuille';
+  }
+
+  // ── Save contact via fetch → Apps Script doPost ───────────────────────────
+  // Uses Content-Type: text/plain so the browser sends no CORS preflight.
+  // Apps Script automatically adds Access-Control-Allow-Origin: * for
+  // deployments set to "Who has access: Anyone".
+  function saveContact() {
+    const btn = document.getElementById('save-btn');
+    btn.disabled    = true;
+    btn.textContent = 'Sauvegarde…';
+
+    const payload = {
+      person_name   : current.person_name,
+      business_name : current.business_name,
+      job_title     : current.job_title,
+      email         : current.email,
+      phone         : current.phone,
+      id            : current.id,
+      note          : document.getElementById('note-field').value.trim()
+    };
+
+    fetch(BACKEND_URL, {
+      method  : 'POST',
+      headers : { 'Content-Type': 'text/plain' },
+      body    : JSON.stringify(payload)
+    })
+    .then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
+    .then(res => {
+      if (res.success) {
+        showToast('✅ ' + res.name + ' sauvegardé!', false);
+        resetScanner();
+      } else {
+        showToast('❌ Erreur: ' + res.error, true);
+        btn.disabled    = false;
+        btn.textContent = '✅  Sauvegarder dans la feuille';
+      }
+    })
+    .catch(err => {
+      showToast('❌ ' + err.message, true);
+      btn.disabled    = false;
+      btn.textContent = '✅  Sauvegarder dans la feuille';
+    });
+  }
+
+  function cancelSave() {
+    current      = null;
+    lastScanData = null;
+    resetScanner();
+  }
+
+  function resetScanner() {
+    document.getElementById('contact-card').style.display    = 'none';
+    document.getElementById('scanner-section').style.display = 'block';
+
+    if (videoStream) {
+      setStatus('📷 Pointez vers un badge QR');
+      scanInterval = setInterval(scanFrame, 250);
+    } else {
+      document.getElementById('start-btn').style.display = 'block';
+      setStatus('Appuyez pour démarrer le scanner');
+    }
+  }
+
+  function setStatus(msg) {
+    document.getElementById('status').textContent = msg;
+  }
+
+  function showToast(msg, isError) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className   = isError ? 'error' : '';
+    t.style.display = 'block';
+    setTimeout(() => { t.style.display = 'none'; }, 3500);
+  }
+</script>
+</body>
+</html>
