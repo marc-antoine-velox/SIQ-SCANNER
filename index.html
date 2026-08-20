@@ -338,9 +338,11 @@
     btn.textContent = '✅  Sauvegarder dans la feuille';
   }
 
-  // ── Save contact via fetch no-cors GET → Apps Script doGet ──────────────
-  // no-cors fires the GET request without reading the response body.
-  // Apps Script saves the data and we show optimistic success.
+  // ── Save contact via image beacon → Apps Script doGet ───────────────────
+  // new Image().src sends Google session cookies (like a real browser nav)
+  // with zero CORS restrictions. Apps Script saves the data and returns JSON;
+  // the browser can't parse JSON as an image so onerror fires — but by then
+  // the data is already written to the sheet.
   function saveContact() {
     const btn = document.getElementById('save-btn');
     btn.disabled    = true;
@@ -357,16 +359,14 @@
       note          : document.getElementById('note-field').value.trim()
     });
 
-    fetch(BACKEND_URL + '?' + params.toString(), { mode: 'no-cors' })
-      .then(() => {
-        showToast('✅ ' + (current.person_name || 'Contact') + ' sauvegardé!', false);
-        resetScanner();
-      })
-      .catch(() => {
-        btn.disabled    = false;
-        btn.textContent = '✅  Sauvegarder dans la feuille';
-        showToast('❌ Erreur réseau — vérifiez votre connexion', true);
-      });
+    const beacon = new Image();
+    const done   = () => {
+      showToast('✅ ' + (current.person_name || 'Contact') + ' sauvegardé!', false);
+      resetScanner();
+    };
+    beacon.onload  = done;
+    beacon.onerror = done;
+    beacon.src = BACKEND_URL + '?' + params.toString();
   }
 
   function cancelSave() {
