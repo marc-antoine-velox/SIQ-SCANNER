@@ -6,10 +6,9 @@
   <title>SIQ Badge Scanner</title>
   <!--
     ── Velox Power Systems / SIQ Badge Scanner — version mobile autonome ──────
-    Ce fichier n'utilise PAS google.script.run.
-    Il appelle l'Apps Script via fetch() (Content-Type: text/plain, pas de preflight CORS).
-    Héberger sur Netlify Drop ou tout hébergeur non-Google pour contourner
-    l'interception de script.google.com par Google Drive sur Android.
+    Sauvegarde via navigation directe (window.location.href → Apps Script → redirect retour).
+    Cette méthode fonctionne sur tous les appareils (desktop et mobile Android/iOS).
+    L'Apps Script doit retourner une redirection HTML vers SCANNER_URL après la sauvegarde.
 
     Si vous redéployez l'Apps Script et obtenez une nouvelle URL, mettez à jour
     la constante BACKEND_URL ci-dessous, puis re-uploadez ce fichier.
@@ -255,14 +254,23 @@
 
 <script>
   // ── Configuration ──────────────────────────────────────────────────────────
-  // If you ever create a NEW Apps Script deployment, update this URL.
-  // To update: just change the string and re-upload this file to Netlify.
   const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbxdGQp3Jq5Q-xy4hcuMJuA2q_aeDGhAG1_Ick9y7dbtz-NEl93ZmkDJ57113CCWfoiG/exec';
 
   let videoStream  = null;
   let scanInterval = null;
   let current      = null;
-  let lastScanData = null;   // debounce: ignore repeated reads of same code
+  let lastScanData = null;
+
+  // ── Check if we just returned from a successful save ──────────────────────
+  (function checkSaved() {
+    const sp = new URLSearchParams(window.location.search);
+    const savedName = sp.get('saved');
+    if (savedName) {
+      // Clean the URL so refreshing doesn't re-show the toast
+      history.replaceState({}, '', window.location.pathname);
+      setTimeout(() => showToast('✅ ' + decodeURIComponent(savedName) + ' sauvegardé!', false), 200);
+    }
+  })();
 
   // ── Start camera ──────────────────────────────────────────────────────────
   function startScanner() {
@@ -338,34 +346,10 @@
     btn.textContent = '✅  Sauvegarder dans la feuille';
   }
 
-  // ── Save via hidden iframe ────────────────────────────────────────────────
-  // Iframe navigation uses Sec-Fetch-Mode: navigate (same as a real browser
-  // visit), so Apps Script's doGet actually runs and saves the data.
-  // fetch / script tags use no-cors mode which Google intercepts differently.
+  // ── Save via full-page navigation ────────────────────────────────────────
+  // Navigate the whole page to Apps Script — it saves the data then redirects
+  // back here with ?saved=Name. Works reliably on all devices (desktop + mobile).
   function saveContact() {
-    const btn  = document.getElementById('save-btn');
-    btn.disabled    = true;
-    btn.textContent = 'Sauvegarde…';
-
-    const name   = current.person_name || 'Contact';
-    let   settled = false;
-
-    function done(ok) {
-      if (settled) return;
-      settled = true;
-      clearTimeout(fallback);
-      const el = document.getElementById('_save_frame');
-      if (el) el.remove();
-      if (ok) {
-        showToast('✅ ' + name + ' sauvegardé!', false);
-        resetScanner();
-      } else {
-        btn.disabled    = false;
-        btn.textContent = '✅  Sauvegarder dans la feuille';
-        showToast('❌ Délai dépassé — vérifiez la connexion', true);
-      }
-    }
-
     const params = new URLSearchParams({
       action        : 'save',
       person_name   : current.person_name   || '',
@@ -377,16 +361,13 @@
       note          : document.getElementById('note-field').value.trim()
     });
 
-    const iframe = document.createElement('iframe');
-    iframe.id            = '_save_frame';
-    iframe.style.cssText = 'display:none;width:0;height:0;border:0;';
-    iframe.onload        = () => done(true);   // fired when Apps Script responds
-    iframe.onerror       = () => done(false);  // genuine network failure
-    iframe.src           = BACKEND_URL + '?' + params.toString();
-    document.body.appendChild(iframe);
+    // Stop camera stream before navigating away
+    if (videoStream) {
+      videoStream.getTracks().forEach(t => t.stop());
+      videoStream = null;
+    }
 
-    // 10 s safety net
-    const fallback = setTimeout(() => done(false), 10000);
+    window.location.href = BACKEND_URL + '?' + params.toString();
   }
 
   function cancelSave() {
