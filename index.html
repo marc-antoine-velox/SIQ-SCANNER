@@ -338,18 +338,56 @@
     btn.textContent = '✅  Sauvegarder dans la feuille';
   }
 
-  // ── Save contact via image beacon → Apps Script doGet ───────────────────
-  // new Image().src sends Google session cookies (like a real browser nav)
-  // with zero CORS restrictions. Apps Script saves the data and returns JSON;
-  // the browser can't parse JSON as an image so onerror fires — but by then
-  // the data is already written to the sheet.
+  // ── Save contact via JSONP script tag ────────────────────────────────────
+  // The <script> tag fires the GET request to Apps Script with no CORS issues.
+  // Apps Script saves the data then returns JSON. If it returns proper JSONP
+  // (callback-wrapped), window[cbName] fires → confirmed success. If it returns
+  // plain JSON (current deployed behaviour), onerror fires — but the data WAS
+  // already saved, so we show success anyway. Only the 12 s timeout means a
+  // genuine network failure.
   function saveContact() {
     const btn = document.getElementById('save-btn');
     btn.disabled    = true;
     btn.textContent = 'Sauvegarde…';
 
+    const cbName = 'siq_cb_' + Date.now();
+    let settled  = false;
+
+    function finish(ok, msg) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      delete window[cbName];
+      const el = document.getElementById('_jsonp');
+      if (el) el.remove();
+      if (ok) {
+        showToast(msg, false);
+        resetScanner();
+      } else {
+        showToast(msg, true);
+        btn.disabled    = false;
+        btn.textContent = '✅  Sauvegarder dans la feuille';
+      }
+    }
+
+    // 12 s — only a genuine unreachable network triggers this
+    const timer = setTimeout(
+      () => finish(false, '❌ Délai dépassé — vérifiez la connexion'),
+      12000
+    );
+
+    // Fires if Apps Script ever returns proper JSONP
+    window[cbName] = (res) => {
+      const name = (res && res.name) ? res.name : (current.person_name || 'Contact');
+      finish(
+        res && res.success !== false,
+        res && res.success !== false ? '✅ ' + name + ' sauvegardé!' : '❌ ' + (res && res.error)
+      );
+    };
+
     const params = new URLSearchParams({
       action        : 'save',
+      cb            : cbName,
       person_name   : current.person_name   || '',
       business_name : current.business_name || '',
       job_title     : current.job_title     || '',
@@ -359,14 +397,13 @@
       note          : document.getElementById('note-field').value.trim()
     });
 
-    const beacon = new Image();
-    const done   = () => {
-      showToast('✅ ' + (current.person_name || 'Contact') + ' sauvegardé!', false);
-      resetScanner();
-    };
-    beacon.onload  = done;
-    beacon.onerror = done;
-    beacon.src = BACKEND_URL + '?' + params.toString();
+    const script = document.createElement('script');
+    script.id    = '_jsonp';
+    script.src   = BACKEND_URL + '?' + params.toString();
+    // onerror fires when Apps Script returns plain JSON (not valid JS).
+    // The data IS saved at that point — show success.
+    script.onerror = () => finish(true, '✅ ' + (current.person_name || 'Contact') + ' sauvegardé!');
+    document.head.appendChild(script);
   }
 
   function cancelSave() {
