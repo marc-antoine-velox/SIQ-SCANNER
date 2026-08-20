@@ -254,17 +254,9 @@
 
 <script>
   // ── Configuration ──────────────────────────────────────────────────────────
-  // Google Form endpoint — accepts submissions from any device, no CORS issues
-  const FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSc-LgbRwdJDWWDWGnYHMAJBO3J8xwmvhHczftZ3frTwog8oFw/formResponse';
-  const ENTRIES  = {
-    person_name   : 'entry.1056399921',
-    business_name : 'entry.589496307',
-    job_title     : 'entry.1257362194',
-    email         : 'entry.1241662995',
-    phone         : 'entry.1829029117',
-    id            : 'entry.1271452941',
-    note          : 'entry.849904740'
-  };
+  // Apps Script backend — fetch() does NOT trigger Android URL interception
+  // (only window.location.href / iframe navigation does)
+  const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbxdGQp3Jq5Q-xy4hcuMJuA2q_aeDGhAG1_Ick9y7dbtz-NEl93ZmkDJ57113CCWfoiG/exec';
 
   let videoStream  = null;
   let scanInterval = null;
@@ -345,24 +337,25 @@
     btn.textContent = '✅  Sauvegarder dans la feuille';
   }
 
-  // ── Save via Google Forms fetch ───────────────────────────────────────────
-  // fetch() to docs.google.com bypasses Android's script.google.com interception.
-  // Fire-and-forget (no-cors) — Google Forms is reliable, show toast immediately.
+  // ── Save via Apps Script fetch (GET with params) ─────────────────────────
+  // fetch() does NOT trigger Android's script.google.com interception —
+  // only browser navigation (window.location.href / iframe) triggers it.
   function saveContact() {
     const name = current.person_name || 'Contact';
     const note = document.getElementById('note-field').value.trim();
 
-    const body = new URLSearchParams({
-      [ENTRIES.person_name]   : current.person_name   || '',
-      [ENTRIES.business_name] : current.business_name || '',
-      [ENTRIES.job_title]     : current.job_title     || '',
-      [ENTRIES.email]         : current.email         || '',
-      [ENTRIES.phone]         : current.phone         || '',
-      [ENTRIES.id]            : current.id            || '',
-      [ENTRIES.note]          : note
+    const params = new URLSearchParams({
+      action:        'save',
+      person_name:   current.person_name   || '',
+      business_name: current.business_name || '',
+      job_title:     current.job_title     || '',
+      email:         current.email         || '',
+      phone:         current.phone         || '',
+      id:            current.id            || '',
+      note:          note
     });
 
-    fetch(FORM_URL, { method: 'POST', mode: 'no-cors', body });
+    fetch(BACKEND_URL + '?' + params.toString(), { mode: 'no-cors' });
 
     showToast('✅ ' + name + ' sauvegardé!', false);
     resetScanner();
