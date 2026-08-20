@@ -338,17 +338,46 @@
     btn.textContent = '✅  Sauvegarder dans la feuille';
   }
 
-  // ── Save contact via GET → Apps Script doGet (action=save) ──────────────
-  // GET requests avoid the CORS redirect issue that affects doPost.
-  // Apps Script adds Access-Control-Allow-Origin: * for GET/ContentService
-  // responses on "Who has access: Anyone" deployments.
+  // ── Save contact via JSONP → Apps Script doGet ───────────────────────────
+  // <script> tag injection has no CORS restrictions — bypasses the
+  // Apps Script redirect/CORS issue that breaks fetch() from external pages.
   function saveContact() {
     const btn = document.getElementById('save-btn');
     btn.disabled    = true;
     btn.textContent = 'Sauvegarde…';
 
+    const cbName = 'siq_cb_' + Date.now();
+
+    // Timeout in case Apps Script never responds
+    const timer = setTimeout(() => {
+      cleanup();
+      showToast('❌ Délai dépassé — réessayez', true);
+      btn.disabled    = false;
+      btn.textContent = '✅  Sauvegarder dans la feuille';
+    }, 12000);
+
+    function cleanup() {
+      clearTimeout(timer);
+      delete window[cbName];
+      const el = document.getElementById('_jsonp');
+      if (el) el.remove();
+    }
+
+    window[cbName] = function(res) {
+      cleanup();
+      if (res.success) {
+        showToast('✅ ' + res.name + ' sauvegardé!', false);
+        resetScanner();
+      } else {
+        showToast('❌ Erreur: ' + res.error, true);
+        btn.disabled    = false;
+        btn.textContent = '✅  Sauvegarder dans la feuille';
+      }
+    };
+
     const params = new URLSearchParams({
       action        : 'save',
+      cb            : cbName,
       person_name   : current.person_name   || '',
       business_name : current.business_name || '',
       job_title     : current.job_title     || '',
@@ -358,23 +387,16 @@
       note          : document.getElementById('note-field').value.trim()
     });
 
-    fetch(BACKEND_URL + '?' + params.toString())
-    .then(r => r.json())
-    .then(res => {
-      if (res.success) {
-        showToast('✅ ' + res.name + ' sauvegardé!', false);
-        resetScanner();
-      } else {
-        showToast('❌ Erreur: ' + res.error, true);
-        btn.disabled    = false;
-        btn.textContent = '✅  Sauvegarder dans la feuille';
-      }
-    })
-    .catch(err => {
-      showToast('❌ ' + err.message, true);
+    const script    = document.createElement('script');
+    script.id       = '_jsonp';
+    script.src      = BACKEND_URL + '?' + params.toString();
+    script.onerror  = () => {
+      cleanup();
+      showToast('❌ Erreur réseau', true);
       btn.disabled    = false;
       btn.textContent = '✅  Sauvegarder dans la feuille';
-    });
+    };
+    document.head.appendChild(script);
   }
 
   function cancelSave() {
