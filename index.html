@@ -338,35 +338,37 @@
     btn.textContent = '✅  Sauvegarder dans la feuille';
   }
 
-  // ── Save contact via fetch → Apps Script doPost ───────────────────────────
-  // Uses Content-Type: text/plain so the browser sends no CORS preflight.
-  // Apps Script automatically adds Access-Control-Allow-Origin: * for
-  // deployments set to "Who has access: Anyone".
+  // ── Save contact via GET → Apps Script doGet (action=save) ──────────────
+  // GET requests avoid the CORS redirect issue that affects doPost.
+  // Apps Script adds Access-Control-Allow-Origin: * for GET/ContentService
+  // responses on "Who has access: Anyone" deployments.
   function saveContact() {
     const btn = document.getElementById('save-btn');
     btn.disabled    = true;
     btn.textContent = 'Sauvegarde…';
 
-    const payload = {
-      person_name   : current.person_name,
-      business_name : current.business_name,
-      job_title     : current.job_title,
-      email         : current.email,
-      phone         : current.phone,
-      id            : current.id,
+    const params = new URLSearchParams({
+      action        : 'save',
+      person_name   : current.person_name   || '',
+      business_name : current.business_name || '',
+      job_title     : current.job_title     || '',
+      email         : current.email         || '',
+      phone         : current.phone         || '',
+      id            : current.id            || '',
       note          : document.getElementById('note-field').value.trim()
-    };
+    });
 
-    fetch(BACKEND_URL, {
-      method  : 'POST',
-      mode    : 'no-cors',
-      headers : { 'Content-Type': 'text/plain' },
-      body    : JSON.stringify(payload)
-    })
-    .then(() => {
-      // no-cors returns opaque response — assume success (Apps Script processes the save)
-      showToast('✅ ' + (current.person_name || 'Contact') + ' sauvegardé!', false);
-      resetScanner();
+    fetch(BACKEND_URL + '?' + params.toString())
+    .then(r => r.json())
+    .then(res => {
+      if (res.success) {
+        showToast('✅ ' + res.name + ' sauvegardé!', false);
+        resetScanner();
+      } else {
+        showToast('❌ Erreur: ' + res.error, true);
+        btn.disabled    = false;
+        btn.textContent = '✅  Sauvegarder dans la feuille';
+      }
     })
     .catch(err => {
       showToast('❌ ' + err.message, true);
